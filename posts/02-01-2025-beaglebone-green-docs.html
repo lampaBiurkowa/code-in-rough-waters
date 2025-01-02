@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Topic 1</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header>
+        <h1>Code in Rough Waters</h1>
+        <nav>
+            <a href="index.html">Home</a>
+            <a href="#">About</a>
+            <a href="#">Contact</a>
+        </nav>
+    </header>
+
+    <main>
+        <article class="blog-post">
+            <h2>Getting Started with BeagleBone Green</h2>
+            <p class="post-meta">Published on January 2, 2025</p>
+
+            <section class="post-content">
+                <p>I'm sure you've heard of Raspberry Pi numerous times. It's a real neat board but have you ever heard of an alternative? Let me introduce you to BeagleBone Green (BBG)! Both boards represent something called single-board computer (SBC). Essentially it's like a micro computer you can buy for a few dozens bucks</p>
+
+                <h3>What is an SBC? 🤔</h3>
+                <p>SBC integrates all components of a traditional computer onto one board, including the processor, memory, and I/O interfaces. The BeagleBone Green, for that matter, features:</p>
+                <ul class="std-enumeration">
+                    <li>AM335x 1GHz ARMR Cortex-A8</li>
+                    <li>512MB DDR3 RAM</li>
+                    <li>4GB eMMC storage</li>
+                    <li>92 pins</li>
+                </ul>
+                <p>There are tons of project ideas available on the internet with people doing all sorts of crazy IoT stuff with Raspberry or BeagleBone 😅. The Arm32 architecture gives them a huge advantage over "regular" Arduino projects - you can install Linux OS, connect to the internet or even use with AI.</p>
+
+                <h3>Calculating Pin Numbers on the BeagleBone Green</h3>
+                <p>I must admit that as for today BBG is poorly documented and I strggled quite a bit to get basic things done. That's why I decided to share some essentials I figured while learning so that you don't have to hassle your way through the whole thing xd. If you're switching from Arduino or STM32 you're probably gonna get a little confused with the pins location. Only the pins on the very corners on the board and the pin blocks ("headers") are described.</p>
+                <div class="image-frame-wrapper">
+                    <figure class="image-frame">
+                        <div class="image-group">
+                            <img src="../images/bbg_header_mark.jpg" alt="BeagleBone Green Header" height="600px">
+                            <img src="https://files.seeedstudio.com/wiki/BeagleBone_Green/images/PINMAP_IO.png" alt="BeagleBone Green Pin Map" height="600px">
+                        </div>
+                        <figcaption>
+                            BeagleBone Green: Header Mark (left) and Pin Map (right).
+                            <br>
+                            The latter image courtesy of <a href="https://wiki.seeedstudio.com/BeagleBone_Green" target="_blank">Seeed Studio</a>, licensed under 
+                            <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank">CC BY-SA 4.0</a>.
+                        </figcaption>
+                    </figure>
+                </div>
+                 <p>But are the numbers actually correct? When you look at the graphics from the wiki, you'll notice discrepancy between GPIO numbers and pin numbers. So who's right? Well, in reality the 96 available pins on the board DO NOT represent the internal CPU's architecture in 100%. Only subset of pins is exposed. The AM335x CPU is split into 4 "GPIO banks" 32 pins each. So in theory you have 128 GPIO pin although not all of them are at your disposal. Now, you'll often find yourself translating the pins between two naming conventions: with and without bank number provided explicitly:</p>
+                <ul class="std-enumeration">
+                    <li>GPIO1_17 (1 * 32 + 17) == GPIO 49</li>
+                    <li>GPIO0_4 (0 * 32 + 4) == GPIO 4</li>
+                    <li>GPIO3_11 (3 * 32 + 11) == GPIO 107</li>
+                </ul>
+                <p>Now, as you can see on the graphics mentioned earlier it has nothing to do with the pin numbers on the board (1-46 on each side of the board). For example, GPIO1_17 refers to pin 17 in GPIO bank 1, which corresponds to GPIO 49 in the system, and can be found on pin 23 in header P9. So using the wiki as our documentation we have:</p>
+                <ul class="std-enumeration">
+                    <li>GPIO1_17 (1 * 32 + 17) == GPIO 49 == pin 23 in P9</li>
+                    <li>GPIO0_4 (0 * 32 + 4) == GPIO 4 == pin 18 in P9</li>
+                    <li>GPIO3_11 (2 * 32 + 11) == GPIO 75 == pin 42 in P8</li>
+                </ul>
+                <p>But this is not the last conversion you will encounter! The pins have some constants pre-defined in order to tweak configuration of your board (like set a pin to be PWM instead of GPIO etc) and are available here: <a href="https://github.com/beagleboard/bb.org-overlays/blob/master/include/dt-bindings/pinctrl/am33xx.h" target="_blank">am33xx.h</a>. Notice that the names don't quite correspond to anything we've seen in the pins for example what "AM335X_PIN_GPMC_A1" means? On the wiki there are some reference files at the bottom, <a href="https://files.seeedstudio.com/wiki/BeagleBone_Green/resources/BeagleBone_Green_REV1.1_SCH.pdf">this one for example</a> shows the cryptic names if you Ctrl+F for "GPMC_A1" you'll find this lengthy line "GPMC_A1/GMII2_RXDV/RGMII2_RCTL/MMC2_DAT0/GPMC_A17/PR1_MII1_TXD3/EHRPWM1_SYNCI_O/GPIO1_17" meaning that the pin is GPIO1_17 -> GPIO 49 -> pin 23 in P9. When you will find yourself modifying .dts files you will need the constants from the .h file. To complete the example:</p>
+                <ul class="std-enumeration">
+                    <li>GPIO1_17 (1 * 32 + 17) == GPIO 49 == pin 23 in P9 == AM335X_PIN_GPMC_A1 (or 0x844)</li>
+                    <li>GPIO0_4 (0 * 32 + 4) == GPIO 4 == pin 18 in P9 == AM335X_PIN_UART0_RXD (or 0x970)</li>
+                    <li>GPIO2_11 (2 * 32 + 11) == GPIO 75 == pin 42 in P8 == AM335X_PIN_LCD_DATA5 (or 0x8b4)</li>
+                </ul>
+
+                <h3>Conclusion</h3>
+                <p>As you can see the first interactions with BBG can be quite scary 🤭 but you can get used to the little inconveniences here and there, after all we're coding in the deep waters! 🌊</p>
+            </section>
+        </article>
+    </main>
+    <footer>
+        <p>&copy; 2025 lampaBiurkowa. All rights reserved.</p>
+    </footer>
+</body>
+</html>
