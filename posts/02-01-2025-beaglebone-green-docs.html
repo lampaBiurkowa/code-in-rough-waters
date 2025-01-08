@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deep Topic 1</title>
+    <title>Getting Started with BeagleBone Green</title>
     <link rel="stylesheet" href="../style.css">
 </head>
 <body>
@@ -34,12 +34,12 @@
                 <p>There are tons of project ideas available on the internet with people doing all sorts of crazy IoT stuff with Raspberry or BeagleBone 😅. The Arm32 architecture gives them a huge advantage over "regular" Arduino projects - you can install Linux OS, connect to the internet or even use with AI.</p>
                 <div class="highlight-box">
                     <h3>BeagleBone Black</h3>
-                    <p>There are many users using BeagleBone Black (BBB). It's the BBG's predecessor and their almost identical which means that those tutorials should be helpful also if you have that board</p>
+                    <p>There are many users using BeagleBone Black (BBB). It's the BBG's predecessor and they're almost identical which means that those tutorials should be helpful also if you have that board.</p>
                 </div>
 
                 <h3>Calculating Pin Numbers on the BeagleBone Green</h3>
                 <p>I must admit that as for today BBG is poorly documented and I struggled quite a bit to get basic things done. That's why I decided to share some essentials I figured while learning so that you don't have to hassle your way through the whole thing xd.</p>
-                <p>If you're switching from Arduino or STM32 you're probably gonna get a little confused with the pins location. Only the pins on the very corners on the board and the pin blocks ("headers") are described.</p>
+                <p>If you're switching from Arduino or STM32 you're probably gonna get a little confused with the pins location. Only the pins on the very corners of the board and the pin blocks ("headers") are described.</p>
                 <div class="image-frame-wrapper">
                     <figure class="image-frame">
                         <div class="image-group">
@@ -47,14 +47,14 @@
                             <img src="https://files.seeedstudio.com/wiki/BeagleBone_Green/images/PINMAP_IO.png" alt="BeagleBone Green Pin Map" height="600px">
                         </div>
                         <figcaption>
-                            BeagleBone Green: Header Mark (left) and Pin Map (right).
+                            BeagleBone Green: 45, 46 pins mark & P9 Header Mark (left) and Pin Map (right).
                             <br>
                             The latter image courtesy of <a href="https://wiki.seeedstudio.com/BeagleBone_Green" target="_blank">Seeed Studio</a>, licensed under 
                             <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank">CC BY-SA 4.0</a>.
                         </figcaption>
                     </figure>
                 </div>
-                 <p>But are the numbers actually correct? When you look at the graphics from the wiki, you'll notice discrepancy between GPIO numbers and pin numbers. So who's right? Well, in reality the 96 available pins on the board DO NOT represent the internal CPU's architecture in 100%. Only subset of pins is exposed. The AM335x CPU is split into 4 "GPIO banks" 32 pins each. So in theory you have 128 GPIO pin although not all of them are at your disposal. Now, you'll often find yourself translating the pins between two naming conventions: with and without bank number provided explicitly:</p>
+                <p>But are the numbers actually correct? When you look at the graphics from the wiki, you'll notice discrepancy between GPIO numbers and pin numbers. So who's right? Well, in reality the 96 available pins on the board DO NOT represent the internal CPU's architecture in 100%. Only subset of pins is exposed. The AM335x CPU is split into 4 "GPIO banks" 32 pins each. So in theory you have 128 GPIO pin although not all of them are at your disposal. Now, you'll often find yourself translating the pins between two naming conventions: with and without bank number provided explicitly:</p>
                 <ul class="std-enumeration">
                     <li>GPIO1_17 (1 * 32 + 17) == GPIO 49</li>
                     <li>GPIO0_4 (0 * 32 + 4) == GPIO 4</li>
