@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Introducing Yocto</title>
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <h1>Code in Rough Waters</h1>
+        <nav>
+            <a href="index.html">Home</a>
+            <a href="#">About</a>
+            <a href="#">Contact</a>
+        </nav>
+    </header>
+
+    <main>
+        <article class="blog-post">
+            <h2>Writing first Linux driver for BBG</h2>
+            <p class="post-meta">Published on January 10, 2025</p>
+
+            <section class="post-content">
+                <h3>Drivers</h3>
+                <p>In Linux drivers (or more generally kernel modules) are low-level programs (written in C not C++) responsible predominantly for communicating with the hardware. They can be dynamically loaded and unloaded during system runtime according to our needs.</p>
+                <div class="highlight-box">
+                    <h3>Great Linux Drivers Tutorials</h3>
+                    <p>There is a <a href="https://www.youtube.com/watch?v=x1Y203vH-Dc&list=PLCGpd0Do5-I3b5TtyqeF1UdyD4C-S-dMa">really nice tutorial</a> showing how to create various Linux drivers. I heavely recommend getting familiar with it in order to better understand what are drivers for.</p>
+                    <p>Another gem is <a href="https://sysprog21.github.io/lkmpg/">this free e-book</a>, especially first few chapters are a must to understand Linux drivers as I'm not gonna get into too many details in my blog.</p>
+                </div>
+
+                <h3>Driver controlling a LED diode</h3>
+                <p>When working with Arduino people often make "blink" as their first program. We can follow this tradition and make our first driver interact with an external LED diode (if you don't have external diode you can work on internal ones too - I made an <a href="https://github.com/lampaBiurkowa/yocto-led-driver">example implementation</a> for that too).</p>
+                <p>First, let's decide which pin will control our diode, because it's gonna be relevant for our code & configuration. I pick pin 16 on P8 header on the physical board. It translates to GPIO_46 which means pin 14 on GPIO1 (1 * 32 + 14 = 46) which further translates to AM335X_PIN_GPMC_AD14 (can be also provided  via its raw value: 0x838). If you're confused refer to <a href="./02-01-2025-beaglebone-green-docs.html">this</a> blog post!</p>
+                <h3>Modifying Data Source Tree (DTS)</h3>
+                <p>Before we can start coding we need to make sure that our BBG is properly configured. Many pins in BBG are multi-purpose: they can work either as PWM, Analog, regular GPIO etc. They have some default settings specified in default .dts files. We're going to explicitly override the settings so that we're sure that pin will be working as GPIO for a LED diode. Our complete .dts will look like this:</p>
+                <div class="code-block">
+                    <pre>
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+* Copyright (C) 2012 Texas Instruments Incorporated - https://www.ti.com/
+*/
+/dts-v1/;
+
+#include "am33xx.dtsi"
+#include "am335x-bone-common.dtsi"
+#include "am335x-bonegreen-common.dtsi"
+
+&am33xx_pinmux {
+    custom_leds: custom_leds {
+        pinctrl-single,pins = <
+            AM33XX_PADCONF(0x838, PIN_OUTPUT_PULLUP, MUX_MODE7)	/* gpmc_ad14.gpio1_14 */
+        >;
+    };
+};
+
+/ {
+    model = "TI AM335x BeagleBone Green";
+    compatible = "ti,am335x-bone-green", "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx";
+
+    myled {
+        compatible = "packt,gpio-descriptor-sample";
+        pinctrl-names = "default";
+        pinctrl-0 = <&custom_leds>;
+        
+        led0 {
+            gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+            label = "myled";
+        };
+    };
+};
+                    </pre>
+                </div>
+                <p>That's quite a little code but much of it is just boilerplate. We include some default .dtsi files (btw notice how the syntax is C-like). And override .dts node "am33xx_pinmux", and inside it we define our custom node. I called it simply "custom_leds". For pin configuration we use "pinctrl-single" where array of pins is defined - the 0x838 (or you can just type AM335X_PIN_GPMC_AD14) is our pin 16 on P8 (as explained earlier), but what is MUX_MODE? I said that pins work in many modes and here we specify it, refer to <a href="https://docs.beagleboard.org/boards/beaglebone/black/ch07.html">documentation</a> (it's for BBB but for me it works on BBG too).</p>
+                <p>Now we define our device, I called it "myled". The "compatible" is generally a unique identifier that will associate driver with the vendor's device, for learning purposes we can go simply for "packt,gpio-descriptor-sample". We assign our pin configuration via "pinctrl-0" attribute. You might wonder why there's also led0 node inside myled. In general case the devices might be sophisticated enough to contain many elements with specific pin subsets - in our case we have only one led which uses the only configured pin.(TODO label?) I assign label?</p>
+                </p>PIN_OUTPUT_PULLUP and GPIO_ACTIVE_HIGH refer to details of how voltage low/high is treated so I'll skip it not to make things even more complicated 😅</p>
+                <h3>Writing kernel module</h3>
+                <p>Now that we encoded some names in .dts we can proceed to writing the kernel module code. Let's start with headers and some macros</p>
+                <div class="code-block cpp-code-block">
+                    <pre>
+#include &lt;linux/module.h&gt;
+#include &lt;linux/init.h&gt;
+#include &lt;linux/mod_devicetable.h&gt;
+#include &lt;linux/property.h&gt;
+#include &lt;linux/platform_device.h&gt;
+#include &lt;linux/of_device.h&gt;
+#include &lt;linux/gpio/consumer.h&gt;
+#include &lt;linux/proc_fs.h&gt;
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("lampaBiutkowa");
+MODULE_DESCRIPTION("Driver for externally connected led diode");
+                    </pre>
+                </div>
+                <p>In kernel modules we can use only libraries from linux/ directory - they are suitable for working in "kernel space". MODULE macros are for some metadata. Let's move on to the basic code skeleton:</p>
+                <div class="code-block cpp-code-block">
+                    <pre>
+//based on https://github.com/PacktPublishing/Linux-Device-Drivers-Development/blob/master/Chapter14/gpio-descriptor-module.c
+static const struct of_device_id gpiod_dt_ids[] =
+{
+    { .compatible = "packt,gpio-descriptor-sample", },
+    { }
+};
+
+static struct platform_driver led_driver = {
+    .probe = on_probe,
+    .remove = on_remove,
+    .driver =
+    {
+        .name = "myled",
+        .of_match_table = gpiod_dt_ids,
+    },
+};
+
+static struct proc_ops fops =
+{
+    .proc_write = set_leds,
+};
+
+static int __init my_init(void)
+{
+    printk("Loading the driver\n");
+    if(platform_driver_register(&led_driver))
+    {
+        printk("Error loading the driver\n");
+        return -1;
+    }
+    
+    control_led_proc = proc_create("control-led", 0666, NULL, &fops); //set permissions
+    if (control_led_proc == NULL)
+        return -2;
+
+    return 0;
+}
+
+static void __exit my_exit(void)
+{
+    platform_driver_unregister(&led_driver);
+    printk("Driver unloaded");
+}
+
+module_init(my_init);
+module_exit(my_exit);
+                    </pre>
+                </div>
+                <p>We have default callbacks module_init and module_exit calling static functions (I called my_init, my_exit). For those wondering why we use __init in my_init even though it's already called from module_init - it's an optimization - information for the kernel to free resources from my_init once initialization is finished. Regarding the permissions - for some Linux reasons 777 didn't work for me there so I use read + write.</p>
+                <p>Apart from it we introduce 3 special structs from linux/ headers:</p>
+                <ul class="std-enumeration">
+                    <li>of_device_id - used for matching our device from dts ("compatible" must match)</li>
+                    <li>platform_driver - defines functions for probing and removing device</li>
+                    <li>proc_ops - allows to set callbacks when certain events on the device happen</li>
+                </ul>
+                <p>Let's see our functions referenced in the structs:</p>
+                <div class="code-block cpp-code-block">
+                    <pre>
+#define LLL_MAX_USER_SIZE (1)
+
+static struct proc_dir_entry *control_led_proc = NULL;
+static struct gpio_desc *led_gpio = NULL;
+
+static char data_buffer[LLL_MAX_USER_SIZE + 1] = {};
+
+static void set_led(struct gpio_desc *diode, uint8_t value)
+{
+    if (value == 0 || value == 1)
+        gpiod_set_value(diode, value);
+}
+
+static ssize_t set_leds(struct file *File, const char *user_buffer, size_t count, loff_t *offs)
+{
+    memset(data_buffer, 0x0, sizeof(data_buffer));
+    if (count > LLL_MAX_USER_SIZE)
+        count = LLL_MAX_USER_SIZE;
+
+    if (copy_from_user(data_buffer, user_buffer, count))
+        return 0;
+
+    set_led(led_gpio, data_buffer[0] - '0');	
+    return count;
+}
+
+static int on_probe(struct platform_device *pdev)
+{
+    struct device *dev = &pdev->dev;
+    struct device_node *child = of_get_child_by_name(dev->of_node, "led0");
+    if (!child) {
+        dev_err(dev, "No child node named 'led0'\n");
+        return -ENODEV;
+    }
+
+    led_gpio = devm_gpiod_get_from_of_node(dev, child, "gpios", 0, GPIOD_OUT_LOW, "led0");
+    of_node_put(child);
+    if (IS_ERR(led_gpio)) {
+        dev_err(dev, "Failed to get GPIO for led0\n");
+        return PTR_ERR(led_gpio);
+    }
+
+    pr_info("Device probed\n");
+    return 0;
+}
+
+static int on_remove(struct platform_device *pdev)
+{
+    gpiod_put(led_gpio);
+    proc_remove(control_led_proc);
+    pr_info("Device removed\n");
+    return 0;
+}
+                    </pre>
+                </div>
+                <p>In on_probe we navigate through our .dts data in order to initialize led_gpio variable and in on_remove we simply free the resources. More interesting thing happens in set_leds. Instead simply reading the input passed as parameter we save it to a buffer via copy_from_user function. Why? We hit a fundamental Linux kernel programming concept - separation between kernel & user space.</p>
+                <p>From kernel code we don't have direct access to user space. We can copy bytes from a given memory address (also we guard that amount of chars is no bigger than one - we except the user to pass either "0" as "1" character as the input). Finally we convert the user's input to int and set the diode status accordingly.</p>
+                <p>Full code is available <a href="https://github.com/lampaBiurkowa/yocto-external-led-driver/blob/master/recipes-core/modules/new-led-dibdriver-0.1/new-led-dibdriver.c">here</a>.</p>
+
+                <h3>Compiling the code</h3>
+                <p>Now you might wonder how to actually compile the code? We'll use a Makefile for that. I'm using a template I found somewhere in the internet 😎. The Makefile is designed specifically for kernel modules and it will build a .ko file which will be delivered to our custom Linux on Beaglebone.</p>
+                <div class="code-block">
+                    <pre>
+obj-m := new-led-dibdriver.o
+
+SRC := $(shell pwd)
+
+all:
+    $(MAKE) -C $(KERNEL_SRC) M=$(SRC)
+
+modules_install:
+    $(MAKE) -C $(KERNEL_SRC) M=$(SRC) modules_install
+
+clean:
+    rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
+    rm -f Module.markers Module.symvers modules.order
+    rm -rf .tmp_versions Modules.symvers
+                    </pre>
+                </div>
+                <h3>Building custom Linux</h3>
+                <p>So now we need to put some effort to assemble our files into a Linux distro. We're gonna use Yocto and create a new layer which will stack upon our previously created core-image-minimal Linux.</p>
+                <ol class="custom-steps">
+                    <li><h4>Create layer</h4>
+                        Create a directory for your layer, it can be next to Poky's directory, by convention we prefix layers with "meta-", you can call it "meta-external-led". Add layer.conf file with following content (substitute "scarthgap" for whathever release of Yocto you use):
+                        <div class="code-block">
+                            <pre>
+# We have a conf and classes directory, add to BBPATH
+BBPATH .= ":${LAYERDIR}"
+
+# We have recipes-* directories, add to BBFILES
+BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+            ${LAYERDIR}/recipes-*/*/*.bbappend"
+
+BBFILE_COLLECTIONS += "meta-custom-extend"
+BBFILE_PATTERN_meta-custom-extend = "^${LAYERDIR}/"
+BBFILE_PRIORITY_meta-custom-extend = "6"
+
+LAYERDEPENDS_meta-custom-extend = "core"
+LAYERSERIES_COMPAT_meta-custom-extend = "scarthgap"
+                            </pre>
+                        </div>
+                        It's essentially a default layer configuration.
+                    </li>
+                    <li><h4>Add kernel module sources</h4>
+                        Create a directory inside your layer, called "modules" (name matters!). Inside create a file external-led_0.1.bb (or whatever name only mind _0.1.bb!) and corresponding directory (for example external-led-0.1, notice that _ is substituted for - here for whatever reason xd). In the xxx-0.1 directory put your Makefile and .c file. Finally fill the .bb file with following content (substitute .c file name for whatever you have):
+                        <div class="code-block">
+                            <pre>
+SUMMARY = "Simple LED driver for BeagleBone Green"
+DESCRIPTION = "Allows setting pins high/low"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+
+TARGET_CC_ARCH += "${LDFLAGS}"
+
+inherit module
+
+SRC_URI = "file://new-led-dibdriver.c file://Makefile"
+
+S = "${WORKDIR}"
+                            </pre>
+                        </div>
+                        Btw the license is mandatory (at least for the version of Yocto I use).
+                    </li>
+                    <li><h4>Apply DTS patch</h4>
+                        This sounds easy but is a bit cumbersome. First, inside your layer directory create another directory "recipes-kernel" and inside it yet another directory "linux". Here you put a couple of things: "linux-yocto_%.bbappend" (yeah those strict names are hilarious) and "beaglebone-yocto" directory. Let's navigate to the folder and paste your .dts file we created earlier (you can call it whatever you want). We also need the original, default .dts file - for my version of Yocto it's in: TODO path. Copy it and call the way you want Now, let's run a following command:
+                        
+                        <div class="code-block">
+                            <pre>
+git diff --no-index orig-file.dts new-file.dts > 0001-add-fake-device.patch
+                            </pre>
+                        </div>
+                        You can call the output file however you want. Unfortunately, we need to manually change the modified file: the paths have to be replaced with relative paths corresponding to Yoto files, for my version: /arch/arm/boot/dts/am335x-bonegreen.dts prefixed with "a" and "b". But in my case I also needded to change some metadata at the top of the file. You can experiment with different names in them because I've put some pretty random content there 😂. Here's my file:
+                        <div class="code-block">
+                            <pre>
+From: Your Name <your.email@example.com>
+Date: Sat, 18 May 2024 12:34:56 +0000
+Subject: [PATCH] Add fake device to am335x-bonegreen.dts
+
+Upstream-Status: Inappropriate [local configuration]
+---
+diff --git a/am335x-bonegreen.orig.dts b/am335x-bonegreen.dts
+index ab7fc30..69dea1e 100644
+--- a/arch/arm/boot/dts/am335x-bonegreen.dts
++++ b/arch/arm/boot/dts/am335x-bonegreen.dts
+@@ -8,7 +8,26 @@
+    #include "am335x-bone-common.dtsi"
+    #include "am335x-bonegreen-common.dtsi"
+    
++&am33xx_pinmux {
++	custom_leds: custom_leds {
++		pinctrl-single,pins = <
++			AM33XX_PADCONF(0x838, PIN_OUTPUT_PULLUP, MUX_MODE7)	/* gpmc_ad14.gpio1_14 */
++		>;
++	};
++};
++
+    / {
+        model = "TI AM335x BeagleBone Green";
+        compatible = "ti,am335x-bone-green", "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx";
++
++	myled {
++        compatible = "packt,gpio-descriptor-sample";
++        pinctrl-names = "default";
++        pinctrl-0 = <&custom_leds>;
++		
++		led0 {
++			gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
++			label = "myled";
++		};
++	};
+    };
+\ No newline at end of file
+                            </pre>
+                        </div>
+                        But we're not done yet! In order to tell Yocto about our file we need to fill the "linux-yocto_%.bbappend" as follows:
+                        <div class="code-block">
+                            <pre>
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+SRC_URI += "file://0001-add-fake-device.patch"
+                            </pre>
+                        </div>
+                    </li>
+                    <li><h4>Finally 😮‍💨 creating Yocto image</h4>
+                        In your main layer directory, create "images" (name matters again!). Inside create a file custom-image.bb (it just has to be .bb file) and put the following content:
+                        <div class="code-block">
+                            <pre>
+SUMMARY = "addin kernel modules"
+
+IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL} kernel-modules kernel-devsrc new-led-dibdriver"
+IMAGE_LINGUAS = " "
+
+LICENSE = "MIT"
+
+inherit core-image
+
+IMAGE_OVERHEAD_FACTOR ?= "1.0"
+IMAGE_ROOTFS_SIZE ?= "204800"
+IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "systemd", " + 4096", "", d)}"
+                            </pre>
+                        </div>
+                        The "new-led-dibdriver" should be renamed to whatever name your folder inside "modules" is (without version of course). Notice that apart from our driver we install kernel-devsrc which is necessary in order to build our module (TODO rly?). We also inherit core-image which is kinda base class for Yocto images and the variables we override come from it (I will not go in much detail to avd confusion). 
+                    </li>
+                </ol>
+                <p>Again, the whole code is available <a href="https://github.com/lampaBiurkowa/yocto-external-led-driver/tree/master">here</a> (I also included the .dts file there).</p>
+                <h3>Adding your layer</h3>
+                <p>We succesfully created our layer, now we have to put it on top of the default beaglebone BSP layer we used to utilize. Once you initialize bitbake for your build a dedicated directory will be created. Navigate there and then to conf directory and open bblayers.conf. Simply at the path to your layer at the end</p>
+                <h3>Ready to build and deploy!</h3>
+                <p>Now you can start build via Yocto and deploy your Linux to BeagleBone as described in the previous blogpost.</p>
+            </section>
+        </article>
+    </main>
+    <footer>
+        <p>&copy; 2025 lampaBiurkowa. All rights reserved.</p>
+    </footer>
+</body>
+</html>
